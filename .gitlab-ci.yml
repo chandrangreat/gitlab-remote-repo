@@ -1,0 +1,65 @@
+stages:
+  - build
+  - test
+  - lint
+  - publish-image
+
+cache:
+  untracked: true
+  key: "$CI_BUILD_REF_NAME"
+  paths:
+    - node_modules/
+
+test:
+ stage: test
+ image: 043537518696.dkr.ecr.ap-south-1.amazonaws.com/ruby2.7-node-12-chrome:v0.0.1
+ before_script:
+    - chmod +x ./build-course.sh
+    - gem install bundler:1.17.3 jekyll:3.8.3
+    - npm ci --chromedriver_cdnurl=https://npm.taobao.org/mirrors/chromedriver
+ script:
+    - npm run e2e
+ tags:
+    - stackbooks-builder-v0.0.1
+
+lint:
+  image: 043537518696.dkr.ecr.ap-south-1.amazonaws.com/ruby2.7-node-12-chrome:v0.0.1
+  stage: lint
+  before_script:
+    - npm ci --chromedriver_cdnurl=https://npm.taobao.org/mirrors/chromedriver
+  script:
+    - npm run lint
+  tags:
+    - stackbooks-builder-v0.0.1
+
+publish-tags-image:
+  image: 043537518696.dkr.ecr.ap-south-1.amazonaws.com/docker-aws-cli:v0.0.1
+  stage: publish-image
+  script:
+    - $(aws ecr get-login --no-include-email --region ${AWS_PROD_REGION})
+    - docker build --no-cache --build-arg CI_COMMIT_SHA=${CI_COMMIT_SHA} --build-arg DEPLOYMENT_DEV_SERVER=${DEPLOYMENT_DEV_SERVER} --build-arg SSH_PRIVATE_KEY="$(cat /keys/id_rsa)" -t stackbooks-course-builder:${CI_COMMIT_SHORT_SHA} .
+    - docker tag stackbooks-course-builder:${CI_COMMIT_SHORT_SHA} ${AWS_PROD_ECR_URL}:${CI_COMMIT_TAG}
+    - docker push ${AWS_PROD_ECR_URL}:${CI_COMMIT_TAG}
+    - docker tag stackbooks-course-builder:${CI_COMMIT_SHORT_SHA} ${AWS_PROD_ECR_URL}:latest
+    - docker push ${AWS_PROD_ECR_URL}:latest
+  only:
+    - tags
+  except:
+    - ^(?!master).*
+  tags:
+    - stackbooks-builder-v0.0.1
+
+publish-feature-image:
+  image: 043537518696.dkr.ecr.ap-south-1.amazonaws.com/docker-aws-cli:v0.0.1
+  stage: publish-image
+  script:
+    - $(aws ecr get-login --no-include-email --region ${AWS_DEV_REGION})
+    - docker build --no-cache --build-arg CI_COMMIT_SHA=${CI_COMMIT_SHA} --build-arg DEPLOYMENT_DEV_SERVER=${DEPLOYMENT_DEV_SERVER} --build-arg SSH_PRIVATE_KEY="$(cat /keys/id_rsa)" -t stackbooks-course-builder:${CI_COMMIT_SHORT_SHA} .
+    - docker tag stackbooks-course-builder:${CI_COMMIT_SHORT_SHA} ${AWS_DEV_ECR_URL}:${CI_COMMIT_REF_NAME}
+    - docker push ${AWS_DEV_ECR_URL}:${CI_COMMIT_REF_NAME}
+  only:
+    - dev
+    - /^feature.*/
+    - /^release.*/
+  tags:
+    - stackbooks-builder-v0.0.1
